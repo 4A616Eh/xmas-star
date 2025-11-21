@@ -1,0 +1,14 @@
+
+Falls nicht vorhanden den Ordner "nologo_esp32c3_super_mini" nach
+
+$HOME/.platformio/packages/framework-arduinoespressif32/variants
+(Linux)
+
+oder 
+
+C:\Users\<Benutername>\.platformio\packages\framework-arduinoespressif32\variants
+(Windows)
+
+kopieren!
+
+
