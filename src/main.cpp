@@ -1,28 +1,14 @@
-#if 0
-#include <Arduino.h>
+#define DEBUG_ENABLE 0
 
-#define LED 8
-
-void setup() {
-    Serial.begin(115200);
-    Serial.println("Hello World");
-    pinMode(LED, OUTPUT);
-}
-
-void loop() {
-    
-    digitalWrite(LED, HIGH);
-    delay(100);
-    digitalWrite(LED, LOW);
-    delay(100);
-}
-
+#if DEBUG_ENABLE
+#define DEBUGF(...)  Serial.printf(__VA_ARGS__)
+#define DEBUGLN(...) Serial.println(__VA_ARGS__)
+#else
+#define DEBUGF(...)
+#define DEBUGLN(...)
 #endif
 
-/// @file    DemoReel100.ino
-/// @brief   FastLED "100 lines of code" demo reel, showing off some effects
-/// @example DemoReel100.ino
-
+#include <Arduino.h>
 #include <FastLED.h>
 
 // FastLED "100-lines-of-code" demo reel, showing just a few 
@@ -37,8 +23,8 @@ void loop() {
 
 #define DATA_PIN    10
 //#define CLK_PIN   4
-#define LED_TYPE    WS2812
-#define COLOR_ORDER GRB
+#define LED_TYPE    WS2812B
+#define COLOR_ORDER RGB
 #define NUM_LEDS    5
 CRGB leds[NUM_LEDS];
 
@@ -53,15 +39,38 @@ enum LedStateEnum {
 struct LedState {
   LedStateEnum state;
   uint16_t waitCounter;      // Wartezeit bis Start
-  uint8_t  fadeCounter;      // 0–255 Fadewert
-  uint8_t  fadeMin;
-  uint8_t  fadeMax;
-  CRGB     targetColor;
-  uint32_t holdMillis;
-  bool debugPrinted;         // verhindert Spam im Serial
+  uint8_t fadeCounter;       // 0–255 Fadewert
+  uint8_t fadeMin;
+  uint8_t fadeMax;
+  CRGB targetColor;
+  uint32_t holdMillis;       // Startzeit des Hold-States
+  uint32_t holdDuration;     // Dauer des Halts (ms)
+  bool debugPrinted;         // Debugausgabe pro State
 };
 
 LedState ledState[NUM_LEDS];
+
+struct PaletteEntry {
+  CRGB color;
+  uint8_t maxBrightness;   // 0–255
+};
+
+const PaletteEntry christmasPalette[] = {
+  { CRGB::Red, 255 }, { CRGB::Green, 120 },
+  { CRGB(255, 215, 0), 200 },  // Gold
+  { CRGB(255, 147, 41), 180 }, // Warm white
+  { CRGB(180, 200, 255), 160 } // Cool white
+};
+
+const uint8_t christmasPaletteSize =
+  sizeof(christmasPalette) / sizeof(christmasPalette[0]);
+
+const PaletteEntry redGreenPalette[] = {
+  { CRGB::Red, 240 }, { CRGB::Green, 220 }
+};
+
+const uint8_t redGreenPaletteSize =
+  sizeof(redGreenPalette) / sizeof(redGreenPalette[0]);
 
 #define BRIGHTNESS          20
 #define FRAMES_PER_SECOND  120
@@ -73,11 +82,26 @@ void initLedStates() {
   }
 }
 
+PaletteEntry getRandomPaletteEntry(const PaletteEntry* palette, uint8_t paletteSize) {
+  return palette[random8(paletteSize)];
+}
+
 void setup() {
+  //pinMode(LED_BUILTIN, OUTPUT);
+  //digitalWrite(LED_BUILTIN, HIGH);
   delay(3000); // 3 second delay for recovery
-  
+  //digitalWrite(LED_BUILTIN, LOW);
+
+#if DEBUG_ENABLE
   Serial.begin(115200);
-  Serial.println("ESP32C3 setup...");
+#endif
+
+  DEBUGLN("ESP32C3 setup...");
+
+  // Hardware-RNG
+  uint16_t seed = (uint16_t)esp_random();
+  random16_set_seed(seed);
+  DEBUGF("Random Seed: %lu\n", seed);
 
   // tell FastLED about the LED strip configuration
   FastLED.addLeds<LED_TYPE,DATA_PIN,COLOR_ORDER>(leds, NUM_LEDS).setCorrection(TypicalLEDStrip);
@@ -89,11 +113,14 @@ void setup() {
   // initialize LED states
   initLedStates();
 
-  Serial.println("setup done.");
+  DEBUGLN("setup done.");
 }
 
 // Forward declarations for pattern functions
+void stupidTest();
+void xmasAnimationPalette(const PaletteEntry* palette, uint8_t paletteSize);
 void xmasRedGreen();
+void xmasChristmasColors();
 void rainbow();
 void rainbowWithGlitter();
 void confetti();
@@ -114,6 +141,9 @@ uint8_t gHue = 0; // rotating "base color" used by many of the patterns
   
 void loop()
 {
+  //stupidTest();
+  //return
+
   // Call the current pattern function once, updating the 'leds' array
   gPatterns[gCurrentPatternNumber]();
 
@@ -135,7 +165,31 @@ void nextPattern()
   gCurrentPatternNumber = (gCurrentPatternNumber + 1) % ARRAY_SIZE( gPatterns);
 }
 
-void xmasRedGreen() 
+void stupidTest() {
+  // just a test pattern
+  for(int i = 0; i < NUM_LEDS; i++) {
+    leds[i] = CRGB::Red;
+  }
+  FastLED.show();
+  delay(500);
+  for(int i = 0; i < NUM_LEDS; i++) {
+    leds[i] = CRGB::Green;
+  }
+  FastLED.show();
+  delay(500);
+  for(int i = 0; i < NUM_LEDS; i++) {
+    leds[i] = CRGB::Blue;
+  }
+  FastLED.show();
+  delay(500);
+  for(int i = 0; i < NUM_LEDS; i++) {
+    leds[i] = CRGB::Black;
+  }
+  FastLED.show();
+  delay(1500);
+}
+
+void xmasAnimationPalette(const PaletteEntry* palette, uint8_t paletteSize)
 {
   for(int pos = 0; pos < NUM_LEDS; pos++)
   {
@@ -144,10 +198,9 @@ void xmasRedGreen()
     {
     // ---------------------------------------------------------
     case ST_INIT:
-      ls.waitCounter = random8(10, 50) * FRAMES_PER_SECOND/2;
+      ls.waitCounter = random8(10, 40) * FRAMES_PER_SECOND/2;
       ls.state = ST_IDLE;
       ls.debugPrinted = false;
-      Serial.printf("LED %d -> ST_IDLE (wait=%d)\n", pos, ls.waitCounter);
       break;
     // ---------------------------------------------------------
     case ST_IDLE:
@@ -155,24 +208,21 @@ void xmasRedGreen()
         ls.waitCounter--;
         break;
       }
-      // Zeit zum starten: Farbe wählen
-      if(random8() & 1) {
-        ls.targetColor = CRGB::Red;
-        ls.fadeMax = 255;
-      } else {
-        ls.targetColor = CRGB::Green;
-        ls.fadeMax = 185; // Grünton etwas dunkler, damit er etwa gleich hell wie rot wirkt
+      // einmalig Farbe aus Palette wählen
+      {
+        PaletteEntry entry = getRandomPaletteEntry(palette, paletteSize);
+        ls.targetColor = entry.color;
+        ls.fadeMax = entry.maxBrightness;
       }
-      ls.fadeMin     = 0;
+      ls.fadeMin = 0;
       ls.fadeCounter = ls.fadeMin;
       ls.state = ST_FADEIN;
       ls.debugPrinted = false;
-      Serial.printf("LED %d -> ST_FADEIN (max=%d)\n", pos, ls.fadeMax);
       break;
     // ---------------------------------------------------------
     case ST_FADEIN:
       if (!ls.debugPrinted) {
-        Serial.printf("LED %d start FADEIN\n", pos);
+        DEBUGF("LED %d -> ST_FADEIN\n", pos);
         ls.debugPrinted = true;
       }
       leds[pos] = ls.targetColor;
@@ -181,41 +231,49 @@ void xmasRedGreen()
         ls.state = ST_HOLD;
         ls.holdMillis = millis();
         ls.debugPrinted = false;
-        Serial.printf("LED %d -> ST_HOLD\n", pos);
       }
       break;
     // ---------------------------------------------------------
     case ST_HOLD:
       if (!ls.debugPrinted) {
-        Serial.printf("LED %d holding\n", pos);
+        // einmalig Hold-Dauer zufällig festlegen
+        ls.holdDuration = random16(200, 600);
+        DEBUGF("LED %d -> ST_HOLD (%d ms)\n", pos, ls.holdDuration);
         ls.debugPrinted = true;
       }
-      // halte 200–600 ms
-      if (millis() - ls.holdMillis > random16(200, 600)) {
+      if (millis() - ls.holdMillis >= ls.holdDuration) {
         ls.fadeCounter = ls.fadeMax;
         ls.state = ST_FADEOUT;
         ls.debugPrinted = false;
-        Serial.printf("LED %d -> ST_FADEOUT\n", pos);
       }
       break;
     // ---------------------------------------------------------
     case ST_FADEOUT:
       if (!ls.debugPrinted) {
-        Serial.printf("LED %d start FADEOUT\n", pos);
+        DEBUGF("LED %d -> ST_FADEOUT\n", pos);
         ls.debugPrinted = true;
       }
       leds[pos] = ls.targetColor;
       leds[pos].nscale8(ls.fadeCounter);
-      if (ls.fadeCounter > 0)
+      if (ls.fadeCounter > 0) {
         ls.fadeCounter--;
-      else {
-        ls.state = ST_INIT;  // neu starten
+      } else {
+        ls.state = ST_INIT;
         ls.debugPrinted = false;
-        Serial.printf("LED %d -> ST_INIT\n", pos);
       }
       break;
     }
   }
+}
+
+void xmasRedGreen() 
+{
+  xmasAnimationPalette(redGreenPalette, redGreenPaletteSize);
+}
+
+void xmasChristmasColors()
+{
+  xmasAnimationPalette(christmasPalette, christmasPaletteSize);
 }
 
 void rainbow() 
